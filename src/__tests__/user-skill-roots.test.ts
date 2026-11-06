@@ -139,10 +139,17 @@ describe('用户工具根目录迁移', () => {
     expect(await readFile(path.join(external, 'profiles/work/agent/skills/fixture/SKILL.md'), 'utf8')).toBe(await readFile(path.join(item.sourcePath, 'SKILL.md'), 'utf8'));
   });
 
-  it.each(['broken', 'loop'])('根链接 %s 时明确失败，不返回可写目标', async (kind) => {
+  it.each(['broken', 'loop'])('根链接 %s 时没有可写目标并保留原链接', async (kind) => {
     local.enabledAgents = ['claude'];
     const root = path.join(home, '.claude');
     await symlink(kind === 'loop' ? root : path.join(base, 'missing'), root, linkType);
-    await expect(new SkillsHandler().deliveryTargets(team, local, item)).rejects.toThrow();
+    const targets = await new SkillsHandler().deliveryTargets(team, local, item).catch((error: NodeJS.ErrnoException) => {
+      expect(['ENOENT', 'ELOOP']).toContain(error.code);
+
+      return [];
+    });
+
+    expect(targets).toEqual([]);
+    expect((await lstat(root)).isSymbolicLink()).toBe(true);
   });
 });

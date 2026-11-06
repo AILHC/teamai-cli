@@ -396,11 +396,19 @@ export async function skillsGuardBase(scopeRoot: string, skillsDir: string, user
   };
 
   if (userRoot && under(userRoot)) {
-    const root = await fs.promises.realpath(userRoot);
-    const scope = await fs.promises.realpath(scopeRoot);
-    const relative = path.relative(scope, root);
+    const entry = await fs.promises.lstat(userRoot).catch((error: NodeJS.ErrnoException) => {
+      if (errnoCode(error) !== 'ENOENT') throw error;
 
-    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return userRoot;
+      return null;
+    });
+
+    if (entry) {
+      const root = await fs.promises.realpath(userRoot);
+      const scope = await fs.promises.realpath(scopeRoot);
+      const relative = path.relative(scope, root);
+
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return userRoot;
+    }
   }
 
   if (under(scopeRoot)) return scopeRoot;
