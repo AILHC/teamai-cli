@@ -7,7 +7,7 @@ import { log } from './utils/logger.js';
 import { warnOnce } from './utils/warn-once.js';
 import type { TeamaiConfig, LocalConfig } from './types.js';
 import { COPILOT_TOOL_ID, resolveBaseDir, isAgentExcluded, scopedToolPaths } from './types.js';
-import { installOf, locate, openclawWorkspaceDir, SHARED_AGENT_SKILLS_PATH, writable } from './locate.js';
+import { installOf, locate, openclawWorkspaceDir, SHARED_AGENT_SKILLS_PATH, skillToolRoot, writable } from './locate.js';
 import { toolHome } from './tool-home.js';
 import {
   CODEX_TOOL, allowsSkillDirectory, describeSkippedSkillDirectory, findSkillDirectoryBlock,
@@ -379,31 +379,29 @@ function skillBackupDir(baseDir: string, tool: string, skillRoot: string, skillN
 /** Where a tool keeps its skills on this machine, and where the link guard starts. */
 export interface BuiltinSkillsTarget {
   skillsDir: string;
-  /**
-   * The scope root (home, or the project root) when the skills directory sits
-   * under it, else the parent of the tool home holding it: `COPILOT_HOME`,
-   * `HERMES_HOME` and OpenClaw's workspace can live anywhere, and the guard
-   * must still check that root and every component below it.
-   */
+  scopeRoot: string;
+  /** 当前技能目录的检查起点；用户工具根迁移不会扩大其内部链接的范围。 */
   guardBase: string;
 }
 
 /**
- * The base the link guard walks down from: the scope root — home, or the
- * project root — when `skillsDir` sits under it, since a link at or above that
- * is ordinary. Not the tool's home: for Copilot that is
- * `COPILOT_HOME`, and starting there would never check whether `COPILOT_HOME`
- * itself is a link. A root outside the scope root has the walk start at the
- * parent of the tool home holding it (`COPILOT_HOME`, `HERMES_HOME`, the
- * OpenClaw workspace), however deep the skills path below it, so that home is
- * checked too.
+ * 用户工具根迁出原作用域时，以该根检查内部链接；其他布局保留原起点。
+ * 项目级不传 userRoot，沿用原来的项目范围及外部适配器检查。
  */
-export async function skillsGuardBase(scopeRoot: string, skillsDir: string): Promise<string> {
+export async function skillsGuardBase(scopeRoot: string, skillsDir: string, userRoot?: string): Promise<string> {
   const under = (root: string): boolean => {
     const relative = path.relative(root, skillsDir);
 
-    return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
+    return relative === '' || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
   };
+
+  if (userRoot && under(userRoot)) {
+    const root = await fs.promises.realpath(userRoot);
+    const scope = await fs.promises.realpath(scopeRoot);
+    const relative = path.relative(scope, root);
+
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return userRoot;
+  }
 
   if (under(scopeRoot)) return scopeRoot;
   const homes = [toolHome(COPILOT_TOOL_ID), toolHome('hermes'), await openclawWorkspaceDir()];
@@ -424,11 +422,14 @@ export async function builtinSkillsTarget(
   teamConfig: Pick<TeamaiConfig, 'toolPaths'>,
   localConfig: LocalConfig,
 ): Promise<BuiltinSkillsTarget | null> {
-  const skillsDir = writable(await locate(tool, 'skills', installOf(teamConfig, localConfig)))?.path ?? null;
+  const install = installOf(teamConfig, localConfig);
+  const skillsDir = writable(await locate(tool, 'skills', install))?.path ?? null;
 
   if (skillsDir === null) return null;
 
-  return { skillsDir, guardBase: await skillsGuardBase(resolveBaseDir(localConfig), skillsDir) };
+  const scopeRoot = resolveBaseDir(localConfig);
+
+  return { skillsDir, scopeRoot, guardBase: await skillsGuardBase(scopeRoot, skillsDir, skillToolRoot(tool, install)) };
 }
 
 /**
@@ -441,26 +442,26 @@ export async function builtinSkillsTarget(
  */
 export async function pruneLegacyBuiltinSkills(
   tool: string,
-  { skillsDir, guardBase }: BuiltinSkillsTarget,
+  { skillsDir, guardBase, scopeRoot }: BuiltinSkillsTarget,
   names: ReadonlySet<string> = LEGACY_BUILTIN_SKILL_NAMES,
 ): Promise<void> {
   // The shared .agents/skills directory belongs to Codex alone. Reaching it from
   // another tool's pass would delete Codex's copies while Codex is excluded or
   // not installed, which the enabledAgents whitelist rules out.
-  const skillRoots = [skillsDir];
+  const skillRoots = [{ dir: skillsDir, base: guardBase }];
 
-  if (tool === CODEX_TOOL) skillRoots.push(path.join(guardBase, SHARED_AGENT_SKILLS_PATH));
+  if (tool === CODEX_TOOL) skillRoots.push({ dir: path.join(scopeRoot, SHARED_AGENT_SKILLS_PATH), base: scopeRoot });
 
   for (const legacyName of names) {
-    for (const root of skillRoots) {
+    for (const { dir: root, base } of skillRoots) {
       const dir = path.join(root, legacyName);
 
       // teamai-share-learnings is now also the skill pull generates for that default workflow.
       if (!await pathExists(dir) || (await generatedSkillAt(dir)).kind === 'ours') continue;
 
       try {
-        const backupDir = skillBackupDir(guardBase, tool, path.relative(guardBase, root), legacyName);
-        const result = await removeOwnedFiles(dir, await ownedSkillFiles(legacyName), guardBase, backupDir);
+        const backupDir = skillBackupDir(base, tool, path.relative(base, root), legacyName);
+        const result = await removeOwnedFiles(dir, await ownedSkillFiles(legacyName), base, backupDir);
         const saved = result.backedUp > 0 ? `; a copy is in ${backupDir}` : '';
 
         if (prunedWhole(result)) {
@@ -498,15 +499,18 @@ async function retireOtherCodexCopy(
   tool: string,
   skillName: string,
   deployedDir: string,
-  { skillsDir, guardBase }: BuiltinSkillsTarget,
+  { skillsDir, guardBase, scopeRoot }: BuiltinSkillsTarget,
 ): Promise<void> {
-  const candidates = [path.join(skillsDir, skillName), path.join(guardBase, SHARED_AGENT_SKILLS_PATH, skillName)];
+  const candidates = [
+    { dir: path.join(skillsDir, skillName), base: guardBase },
+    { dir: path.join(scopeRoot, SHARED_AGENT_SKILLS_PATH, skillName), base: scopeRoot },
+  ];
 
-  for (const other of candidates) {
+  for (const { dir: other, base } of candidates) {
     if (await fs.promises.realpath(other).catch(() => other) === await fs.promises.realpath(deployedDir).catch(() => deployedDir)
       || !await pathExists(other)) continue;
-    const backupDir = skillBackupDir(guardBase, tool, path.relative(guardBase, path.dirname(other)), skillName);
-    const result = await removeOwnedFiles(other, await ownedSkillFiles(skillName), guardBase, backupDir);
+    const backupDir = skillBackupDir(base, tool, path.relative(base, path.dirname(other)), skillName);
+    const result = await removeOwnedFiles(other, await ownedSkillFiles(skillName), base, backupDir);
 
     if (prunedWhole(result)) {
       log.debug(`Removed the second Codex copy of ${skillName} at ${other}; the stub is at ${deployedDir}`);
@@ -614,7 +618,7 @@ export async function deployBuiltinSkills(
       continue;
     }
 
-    const baseDir = target.guardBase;
+    const userRoot = skillToolRoot(tool, installOf(teamConfig, localConfig));
 
     // An excluded agent is neither written to nor deleted from (usage-guide:
     // "the enabledAgents whitelist also gates CLI built-in skills"), so its
@@ -636,8 +640,9 @@ export async function deployBuiltinSkills(
       // The other Codex copy is dealt with below, under the guard. A built-in
       // name is the CLI's (`isCliOwnedSkillName`), so an existing shared copy
       // takes the stub; its files are judged by what a release shipped.
-      const ownsShared = async (dir: string): Promise<boolean> => allowsSkillDirectory(baseDir, dir);
+      const ownsShared = async (dir: string): Promise<boolean> => allowsSkillDirectory(target.scopeRoot, dir);
       const destDir = await skillTarget({ tool, skillName, ownsShared }) ?? path.join(target.skillsDir, skillName);
+      const baseDir = await skillsGuardBase(target.scopeRoot, path.dirname(destDir), userRoot);
 
       try {
         // Deployment and pruning follow the same repository boundary.

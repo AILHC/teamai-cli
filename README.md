@@ -23,6 +23,14 @@
 
 A teammate initializes once. After that, the latest team AI assets sync automatically.
 
+### AILHC 稳定版维护入口
+
+本 Fork 的 `my-main` 基于官方 `v0.29.0`，定制版本为 `0.29.0-hc.1`；运维父仓通过 `vendor/teamai-cli` 固定源码提交。用户级工具根目录可迁移到 HOME 外，软链接和 Windows junction 由既有路径解析处理，不需要新增授权文件或逐个登记。技能根内部再次越界、项目级越界及用户文件归属保护不变。本次不定制 Claude 或 omp 程序。
+
+维护时在获准的维护工作区获取官方上游并合并选定稳定版，运行 `npm ci`、`npm run typecheck`、`npm run lint`、`npm run build` 及用户工具根回归测试，再用虚拟 HOME 和假仓库验证真实 CLI 的分发、更新、清理、卸载与私有文件保留。先推送 Fork，后更新父仓子模块指针与台账；从固定提交构建安装包，不改安装副本。每次部署记录版本、源码 SHA、包摘要、回退包及逐机器结果；官方等价支持通过回归后删除本补丁。
+
+真实 Claude 的文件同步须事先列出目标和动作，验证不启动 Claude、不使用订阅账号。隔离验证通过不等于正式宿主加载或用户验收。
+
 ## Why TeamAI
 
 <p align="center">

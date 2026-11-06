@@ -27,7 +27,7 @@ import {
 } from './utils/shell-profile.js';
 import { getUserHome } from './utils/home.js';
 import { loadStateForScope } from './config.js';
-import { installOf, isInstalledFor, locate, ownOf, unreadWrites, workspaceHooksOf, writable, writesOf, type DirPlace, type FilesChannel, type Install, type Location, type ReadGate, type Session, type Unread } from './locate.js';
+import { installOf, isInstalledFor, locate, ownOf, skillToolRoot, unreadWrites, workspaceHooksOf, writable, writesOf, type DirPlace, type FilesChannel, type Install, type Location, type ReadGate, type Session, type Unread } from './locate.js';
 import { readGateCheckName, readGateVerdict, type Held } from './read-gates.js';
 import { amongPlaces, placesRecordOf, samePlaces } from './resources/places.js';
 import { realHost, toolHome } from './tool-home.js';
@@ -472,7 +472,8 @@ export async function buildSkillDirChecks(ctx: DoctorContext): Promise<Check[]> 
     const blocks = [];
 
     for (const { path: dir } of writesOf(where)) {
-      const base = await skillsGuardBase(resolveBaseDir(ctx.localConfig), dir);
+      const userRoot = ctx.teamConfig ? skillToolRoot(tool, installOf(ctx.teamConfig, ctx.localConfig)) : undefined;
+      const base = await skillsGuardBase(resolveBaseDir(ctx.localConfig), dir, userRoot);
       // The built-in teamai skill is always owed, even without team skills.
       const block = await findSkillDirectoryBlock(base, path.join(dir, 'teamai'), { keepSkillLink: true });
 

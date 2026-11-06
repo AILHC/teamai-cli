@@ -572,6 +572,26 @@ function rootsOf(tool: string, install: Install, host: Host): Roots {
   };
 }
 
+/** 用户级技能的工具根；复用原有根迁移和配置解析，项目级不改变检查范围。 */
+export function skillToolRoot(tool: string, install: Install, host: Host = realHost()): string | undefined {
+  if (install.scope !== 'user') return undefined;
+  const roots = rootsOf(tool, install, host);
+  const skills = roots.configured('skills');
+
+  if (!skills) return undefined;
+  const root = recordedToolRootDir(tool, install.toolRoots, { home: host.home, path: host.path }) ?? roots.home?.dir;
+
+  if (root) {
+    const relative = host.path.relative(root, skills);
+
+    if (relative === '' || relative !== '..' && !relative.startsWith(`..${host.path.sep}`) && !host.path.isAbsolute(relative)) return root;
+  }
+
+  const configured = roots.paths?.skills;
+
+  return configured ? roots.underHome(toolGateRoot(tool, configured, install.toolRoots, { home: host.home, path: host.path })) : undefined;
+}
+
 /**
  * `install` seen from its user scope: a run-time channel and a local MCP scope run from the tool's user config,
  * and a project pull cleans what an earlier one left in a user file (Hermes' SOUL.md).

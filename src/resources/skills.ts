@@ -11,7 +11,7 @@ import { debugOnce, warnOnce } from '../utils/warn-once.js';
 import { getFileContentWhenAdded, isPastVersionOf, resolveAnchors } from '../utils/git.js';
 import { isCliOwnedSkillName, ownedSkillFiles, prunedWhole, removeOwnedFiles, skillsGuardBase } from '../builtin-skills.js';
 import { generatedSkillAt } from '../workflow/discovery/generated-marker.js';
-import { installOf, locate, ownOf, SHARED_AGENT_SKILLS_PATH, writable, writesOf, type Install } from '../locate.js';
+import { installOf, locate, ownOf, SHARED_AGENT_SKILLS_PATH, skillToolRoot, writable, writesOf, type Install } from '../locate.js';
 import {
   loadRolesManifest, resolveRoleResourceNamespaces, RolesManifestNotFoundError, type RolesManifest,
 } from '../roles.js';
@@ -123,8 +123,8 @@ export function describeSkillDirectoryBlock(block: SkillDirectoryBlock): string 
 }
 
 /** Whether a team-skill delete may reach `skillDir` by the delivery rule; warns and keeps it when not. */
-export async function mayDeleteSkillCopy(localConfig: LocalConfig, skillDir: string): Promise<boolean> {
-  if (await allowsSkillDirectory(await skillsGuardBase(resolveBaseDir(localConfig), path.dirname(skillDir)), skillDir)) return true;
+export async function mayDeleteSkillCopy(localConfig: LocalConfig, skillDir: string, userRoot?: string): Promise<boolean> {
+  if (await allowsSkillDirectory(await skillsGuardBase(resolveBaseDir(localConfig), path.dirname(skillDir), userRoot), skillDir)) return true;
   warnOnce(describeOutsideSkillLink(skillDir));
 
   return false;
@@ -343,7 +343,7 @@ export function skillTargetsFor(
       if (sourcePath && await pathExists(configuredDestination)) {
         if (await judgeRemoval(undefined, configuredDestination, skillOrigin(localConfig.repo.localPath, skillName)) !== 'remove') {
           log.warn(`Codex skill conflict for ${skillName}: keeping different copies in ${SHARED_AGENT_SKILLS_PATH} and ${configuredSkillsPath}`);
-        } else if (!await keepsTrackedCopy(configuredDestination, sharedDestination) && await mayDeleteSkillCopy(localConfig, configuredDestination)) {
+        } else if (!await keepsTrackedCopy(configuredDestination, sharedDestination) && await mayDeleteSkillCopy(localConfig, configuredDestination, skillToolRoot(tool, install))) {
           await removeDelivered(ledger, configuredDestination);
           log.debug(`Removed TeamAI skill ${skillName} from ${configuredSkillsPath}: Codex reads it from ${SHARED_AGENT_SKILLS_PATH}`);
         }
@@ -1520,7 +1520,8 @@ export class SkillsHandler extends ResourceHandler {
         continue;
       }
 
-      const guard = await skillsGuardBase(resolveBaseDir(localConfig), skillsDir);
+      const userRoot = skillToolRoot(tool, install);
+      const guard = await skillsGuardBase(resolveBaseDir(localConfig), skillsDir, userRoot);
       const block = await findSkillDirectoryBlock(guard, path.join(skillsDir, item.name), { keepSkillLink: true });
 
       if (block) {
@@ -1536,7 +1537,7 @@ export class SkillsHandler extends ResourceHandler {
       }
 
       const ownsShared = async (dest: string): Promise<boolean> =>
-        await allowsSkillDirectory(guard, dest) && (await judgeCopy(ledger?.previous, item, { tool, dest, origin })).kind !== 'member';
+        await allowsSkillDirectory(await skillsGuardBase(resolveBaseDir(localConfig), path.dirname(dest), userRoot), dest) && (await judgeCopy(ledger?.previous, item, { tool, dest, origin })).kind !== 'member';
 
       const dest = await skillTarget({ tool, skillName: item.name, ownsShared, sourcePath });
       // Codex's copy moved into the shared directory: the record of the one it left goes with it.
@@ -1647,11 +1648,12 @@ export class SkillsHandler extends ResourceHandler {
 
       for (const { path: skillsDir } of writesOf(where)) {
         const skillDir = path.join(skillsDir, name);
-        const toolBase = await skillsGuardBase(resolveBaseDir(localConfig), skillsDir);
+        const userRoot = skillToolRoot(tool, install);
+        const toolBase = await skillsGuardBase(resolveBaseDir(localConfig), skillsDir, userRoot);
 
         if (!await pathExists(skillDir)) continue;
 
-        if (!await mayDeleteSkillCopy(localConfig, skillDir)) continue;
+        if (!await mayDeleteSkillCopy(localConfig, skillDir, userRoot)) continue;
 
         // A link is the member's even at a built-in's name, so it is judged before the name.
         // A built-in's name loses the team's files and those a release packaged there, as on uninstall:

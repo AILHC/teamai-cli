@@ -71,7 +71,7 @@ import {
   removeOwnedFiles,
   skillsGuardBase,
 } from './builtin-skills.js';
-import { cleanupOf, hookAdapterDirIn, hookSettingsFile, installOf, isInstalledFor, locate, openclawWorkspaceDir, ownOf, SHARED_AGENT_SKILLS_PATH, workspaceHooksOf, writesOf, type Location } from './locate.js';
+import { cleanupOf, hookAdapterDirIn, hookSettingsFile, installOf, isInstalledFor, locate, openclawWorkspaceDir, ownOf, SHARED_AGENT_SKILLS_PATH, skillToolRoot, workspaceHooksOf, writesOf, type Location } from './locate.js';
 import { toolHome, toolHomesAcrossProfiles } from './tool-home.js';
 import { channelsOf, hookFormatOf, isToolId, TOOLS } from './tools.js';
 import { CODEX_TOOL_IDS } from './utils/tool-names.js';
@@ -532,6 +532,7 @@ async function discoverToolResources(
    * HTTP agent, a self-mode project or another checkout still uses them (#945).
    */
   globalAdapters = scope === 'user',
+  userRoot?: string,
 ): Promise<ToolResources> {
   const res: ToolResources = {
     hookFiles: [], openclawHookDirs: [], opencodePluginDirs: [], ompHookFiles: [], kiroHookFile: null, agyHookFile: null, piHookFiles: [], dshHookFile: null, bridgedTeamHookFiles: [],
@@ -788,9 +789,9 @@ async function discoverToolResources(
     // Skills root → the base the link guard starts from.
     // oxlint-disable-next-line teamai/configured-tool-paths -- remove the legacy configured root written before locate
     const configuredSkills = path.join(baseDir, toolPath.skills);
-    const skillRoots = new Map([[configuredSkills, await skillsGuardBase(scopeRoot, configuredSkills)]]);
+    const skillRoots = new Map([[configuredSkills, await skillsGuardBase(scopeRoot, configuredSkills, userRoot)]]);
 
-    for (const skillsDir of skillWrites) skillRoots.set(skillsDir, await skillsGuardBase(scopeRoot, skillsDir));
+    for (const skillsDir of skillWrites) skillRoots.set(skillsDir, await skillsGuardBase(scopeRoot, skillsDir, userRoot));
 
     // A team skill's name is no proof: only teamai's copies go (#993).
     for (const [skillsDir, rootBase] of skillRoots) {
@@ -1341,6 +1342,7 @@ async function buildRemovalPlan(
         localConfig.scope,
         hookToolPaths[tool]?.settings,
         globalAdapters,
+        skillToolRoot(tool, install),
       ),
     );
   }

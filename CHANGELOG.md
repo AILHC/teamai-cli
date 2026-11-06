@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## 0.29.0-hc.1（AILHC 定制）
+
+- 基于官方 v0.29.0：用户级技能操作从已解析的工具根目录检查内部链接，支持通过软链接或 Windows junction 迁移工具根；不新增授权文件或路径白名单。分发、内置技能、诊断、清理和卸载使用同一解析；项目级越界与用户文件归属保护保持不变，Codex 共享技能目录保持独立检查范围。
+
 ## [Unreleased]
 
 ### ✨ Features

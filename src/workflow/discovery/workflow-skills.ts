@@ -105,18 +105,19 @@ async function plan(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise
     const { guardBase } = target;
 
     // Codex takes the shared `.agents/skills` copy only when it is free or already generated.
-    const ownsShared = async (dir: string): Promise<boolean> => await allowsSkillDirectory(guardBase, dir)
+    const ownsShared = async (dir: string): Promise<boolean> => await allowsSkillDirectory(target.scopeRoot, dir)
       && (!await pathExists(dir) || (await generatedSkillAt(dir)).kind === 'ours');
 
-    for (const dir of [target.skillsDir, ...tool === CODEX_TOOL ? [path.join(guardBase, SHARED_AGENT_SKILLS_PATH)] : []]) {
-      if (!roots.has(dir)) roots.set(dir, { dir, guardBase });
-    }
+    roots.set(target.skillsDir, { dir: target.skillsDir, guardBase });
+    const sharedDir = path.join(target.scopeRoot, SHARED_AGENT_SKILLS_PATH);
+
+    if (tool === CODEX_TOOL && !roots.has(sharedDir)) roots.set(sharedDir, { dir: sharedDir, guardBase: target.scopeRoot });
 
     for (const workflow of workflows) {
       const dir = await skillTarget({ tool, skillName: workflow.skill, ownsShared }) ?? path.join(target.skillsDir, workflow.skill);
 
       if (placed.has(dir)) continue;
-      placed.set(dir, { tool, workflow: workflow.name, skill: workflow.skill, dir, guardBase, content: renderWorkflowSkill(workflow, tool) });
+      placed.set(dir, { tool, workflow: workflow.name, skill: workflow.skill, dir, guardBase: roots.get(path.dirname(dir))?.guardBase ?? guardBase, content: renderWorkflowSkill(workflow, tool) });
     }
   }
 

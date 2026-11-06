@@ -31,7 +31,7 @@ import {
 } from './resources/docs.js';
 import { ResourceHandler } from './resources/base.js';
 import { CODEX_TOOL, codexSkillsSplit, mayDeleteSkillCopy, skillOrigin } from './resources/skills.js';
-import { installOf, locate, ownOf, SHARED_AGENT_SKILLS_PATH, writable, writesOf, type Install } from './locate.js';
+import { installOf, locate, ownOf, SHARED_AGENT_SKILLS_PATH, skillToolRoot, writable, writesOf, type Install } from './locate.js';
 import { isWithin } from './utils/agent-path.js';
 import { describeToolHomeChange, recordToolHomes } from './tool-home-record.js';
 import { describeInvalidToolHomes, realHost } from './tool-home.js';
@@ -453,7 +453,7 @@ export async function cleanupInactiveNamespaceSkills(
 
       if (await keepsTrackedCopy(localSkillDir)) continue;
 
-      if (!await mayDeleteSkillCopy(localConfig, localSkillDir)) continue;
+      if (!await mayDeleteSkillCopy(localConfig, localSkillDir, skillToolRoot(tool, install))) continue;
 
       await removeDelivered(ledger, localSkillDir);
       removed.add(skillName);
@@ -521,6 +521,7 @@ async function removeUndeliveredSkillCopy(
   copy: { dir: string; name: string; origin?: CopyOrigin },
   ledger: DeliveryLedger | undefined,
   scopeLabel: string,
+  userRoot?: string,
 ): Promise<boolean> {
   const { dir, name, origin } = copy;
 
@@ -546,7 +547,7 @@ async function removeUndeliveredSkillCopy(
 
   if (await keepsTrackedCopy(dir)) return false;
 
-  if (!await mayDeleteSkillCopy(localConfig, dir)) return false;
+  if (!await mayDeleteSkillCopy(localConfig, dir, userRoot)) return false;
   await removeDelivered(ledger, dir);
 
   return true;
@@ -863,7 +864,7 @@ async function cleanupTombstonedResources(
 
           if (await keepsTrackedCopy(localPath)) continue;
 
-          if (type === 'skills' && !await mayDeleteSkillCopy(localConfig, localPath)) continue;
+          if (type === 'skills' && !await mayDeleteSkillCopy(localConfig, localPath, skillToolRoot(tool, installOf(freshConfig, localConfig)))) continue;
           await removeDelivered(ledger, localPath);
 
           if (type === 'agents' && tool === 'joycode') {
@@ -2771,7 +2772,7 @@ async function pullForScope(
           // record proves it teamai's, so only an unchanged copy goes.
           if (!isOtherTeamsSkill(dir, skillDir)) continue;
 
-          if (!await removeUndeliveredSkillCopy(localConfig, { dir: skillDir, name: dir }, ledger, scopeLabel)) continue;
+          if (!await removeUndeliveredSkillCopy(localConfig, { dir: skillDir, name: dir }, ledger, scopeLabel, skillToolRoot(tool, install))) continue;
           undeliveredSkills.add(dir);
           log.debug(`[${scopeLabel}] Removed skill ${dir} from ${tool}: no longer delivered here`);
           continue;
@@ -2787,7 +2788,7 @@ async function pullForScope(
 
         if (await keepsTrackedCopy(skillDir)) continue;
 
-        if (!await mayDeleteSkillCopy(localConfig, skillDir)) continue;
+        if (!await mayDeleteSkillCopy(localConfig, skillDir, skillToolRoot(tool, install))) continue;
         await removeDelivered(ledger, skillDir);
 
         if (excludedSkills.has(dir)) {
@@ -2825,7 +2826,7 @@ async function pullForScope(
 
             if (await keepsTrackedCopy(nestedSkillDir)) continue;
 
-            if (!await mayDeleteSkillCopy(localConfig, nestedSkillDir)) continue;
+            if (!await mayDeleteSkillCopy(localConfig, nestedSkillDir, skillToolRoot(tool, install))) continue;
             await removeDelivered(ledger, nestedSkillDir);
             log.debug(`Removed excluded skill ${namespace}/${skillName} from ${tool}`);
           }
