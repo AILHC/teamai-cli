@@ -23,6 +23,14 @@
 
 A teammate initializes once. After that, the latest team AI assets sync automatically.
 
+### AILHC Fork 维护
+
+本 Fork 定制用户级技能的可信根目录链接，不修改 Claude 或 omp 程序。维护源为本仓提交；运维父仓通过 `vendor/teamai-cli` 子模块固定版本，不在安装副本中打补丁。
+
+本机 `~/.teamai/trusted-skill-links.json` 为 JSON 对象：键是 HOME 直属工具根链接的绝对路径，值是该链接实际目标的规范绝对路径。例如虚拟环境的 `/home/demo/.claude` 对应 `/data/demo-claude`；Windows 路径须按 JSON 转义。只有精确登记且实际目标匹配的根链接才获准，授权同时影响技能写入、清理和卸载；文件缺失、损坏或本身为链接时不放行。项目级链接、技能自身链接及目标内部再次越界仍由原保护机制拒绝。该文件包含机器路径，只留本机，不加入共享团队配置。
+
+升级时在维护工作区获取并合并官方上游，审阅本定制与上游路径守卫的差异，运行 `npm ci`、`npm run build`、`npm run typecheck`、聚焦测试 `npm test -- src/__tests__/trusted-skill-links.test.ts` 和隔离 CLI 分发验证。先提交并推送 Fork，再更新运维父仓的子模块指针与台账；构建产物来自固定提交。官方提供等价可信目标支持并通过回归后，删除本定制，不保留两套实现。真实 Claude 同步须先确认目标和动作；验证不启动 Claude、不使用订阅账号。
+
 ## Why TeamAI
 
 <p align="center">

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file. See [standa
 
 ## [Unreleased]
 
+### AILHC 定制
+
+- 用户级技能同步允许在本机 `~/.teamai/trusted-skill-links.json` 中明确登记 HOME 直属工具根链接及其规范绝对目标。未登记、目标不匹配、项目级越界和目标内部再次越界的链接仍拒绝；同一守卫继续用于写入、清理和卸载。默认不授权任何目标，配置不进入共享团队仓。
+
 ### ✨ Features
 
 - Antigravity CLI (`agy`) is a built-in tool: `teamai init --agent agy` delivers skills, rules (`trigger: always_on`, or `model_decision` for a rule with `paths:`), team culture, agents (with agy's own tool names), MCP (user `~/.gemini/config/mcp_config.json`; a project's through a `.agents/plugins/teamai` plugin) and hooks, the team's `tools: [agy]` hooks included, to `~/.gemini/config` and a project's `.agents`, never to Gemini CLI's files. teamai records agy's skill loads and tokens, reads its sessions (read-only: `session migrate` takes them to other tools), switches it to a `gemini`-protocol model gateway with `teamai models switch`, and runs its own AI calls, local workflow steps and local scorer judge on it (for [#1426](https://github.com/Tencent/teamai-cli/issues/1426)).

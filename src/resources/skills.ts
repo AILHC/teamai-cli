@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import YAML from 'yaml';
 import { z } from 'zod';
 import { ResourceHandler, type ScanForPushOptions } from './base.js';
@@ -8,6 +8,7 @@ import { getPushignorePath, resolveBaseDir, scopedToolPaths, SELF_KNOWLEDGE_SCAN
 import { isDraft, listDirs, listFilesRecursive, pathExists, copyDir, remove, pruneEmptyDirs, dirContentEqual, dirTeamSubsetEqual, fileContentEqual, fileHash, getDirLatestMtime, readFileSafe, writeFile } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { debugOnce, warnOnce } from '../utils/warn-once.js';
+import { getUserHome } from '../utils/home.js';
 import { getFileContentWhenAdded, isPastVersionOf, resolveAnchors } from '../utils/git.js';
 import { isCliOwnedSkillName, ownedSkillFiles, prunedWhole, removeOwnedFiles, skillsGuardBase } from '../builtin-skills.js';
 import { generatedSkillAt } from '../workflow/discovery/generated-marker.js';
@@ -42,6 +43,29 @@ export type SkillDirectoryBlock =
   | { kind: 'link-outside-base'; link: string; resolved: string; baseDir: string }
   | { kind: 'link-to-other-repository'; link: string; resolved: string };
 
+/** 本机授权只允许 HOME 的直属工具根链接，目标须与登记的规范绝对路径相同。 */
+async function trustedUserRoot(baseDir: string, link: string, resolved: string): Promise<boolean> {
+  const home = getUserHome();
+
+  if (path.relative(home, baseDir) !== '' || path.relative(home, path.dirname(link)) !== '') return false;
+  const policy = path.join(home, '.teamai', 'trusted-skill-links.json');
+
+  try {
+    if (!(await lstat(policy)).isFile()) return false;
+    const parsed = z.record(z.string(), z.string()).safeParse(JSON.parse(await readFile(policy, 'utf8')));
+
+    if (!parsed.success) return false;
+
+    return Object.entries(parsed.data).some(([registered, target]) =>
+      path.isAbsolute(registered) && path.isAbsolute(target)
+      && path.relative(link, registered) === ''
+      && path.relative(path.resolve(target), resolved) === ''
+      && path.dirname(path.resolve(target)) !== path.resolve(target));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Root links may share skills under the base within one repository (its checkouts share a project
  * identity); a skill's own link remains the member's.
@@ -57,6 +81,7 @@ export async function findSkillDirectoryBlock(
 
   if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return { kind: 'outside-base', target, baseDir };
   let walked = baseDir;
+  let trustedBase: string | undefined;
 
   for (const segment of relative.split(path.sep).filter(Boolean)) {
     walked = path.join(walked, segment);
@@ -75,10 +100,18 @@ export async function findSkillDirectoryBlock(
     const resolved = await realpath(walked).catch(() => null);
 
     if (!resolved) return { kind: 'broken-link', link: walked };
-    const base = await realpath(baseDir);
+    const base = trustedBase ?? await realpath(baseDir);
     const rel = path.relative(base, resolved);
 
-    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) return { kind: 'link-outside-base', link: walked, resolved, baseDir };
+    if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+      if (!trustedBase && await trustedUserRoot(baseDir, walked, resolved)) {
+        trustedBase = resolved;
+        continue;
+      }
+
+      return { kind: 'link-outside-base', link: walked, resolved, baseDir };
+    }
+
     const [from, to] = await Promise.all([resolveAnchors(base), resolveAnchors(resolved)]);
 
     // Outside Git (a user-scope home), staying under the base is enough.
